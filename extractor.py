@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import fitz  # PyMuPDF
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -24,7 +25,7 @@ def load_document_as_image(file_path: str) -> Image.Image:
     if ext == ".pdf":
         doc = fitz.open(file_path)
         page = doc.load_page(0)
-        pix = page.get_pixmap(dpi=200)
+        pix = page.get_pixmap(dpi=150)
         return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     elif ext in [".jpg", ".jpeg", ".png", ".webp"]:
         return Image.open(file_path)
@@ -46,8 +47,16 @@ def verify_certificate(file_path: str) -> dict:
         "strictly matching the required JSON schema."
     )
 
-    # Verified models from your API key list, ordered for fast response
-    for model_name in ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.8-flash"]:
+    models_to_try = [
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+    ]
+
+    for model_name in models_to_try:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -61,11 +70,12 @@ def verify_certificate(file_path: str) -> dict:
             return json.loads(response.text)
         except Exception as e:
             err_msg = str(e)
-            if "503" in err_msg or "429" in err_msg:
-                print(f"{model_name} busy, switching immediately...")
+            if "503" in err_msg or "429" in err_msg or "404" in err_msg:
+                print(f"{model_name} unavailable/busy, switching to next model...")
+                time.sleep(1)
                 continue
             raise e
-    raise RuntimeError("All configured Gemini models are temporarily busy.")
+    raise RuntimeError("All configured Gemini models are temporarily busy. Please retry in a few seconds.")
 
 if __name__ == "__main__":
     sample_file = "sample_certificate.pdf"
