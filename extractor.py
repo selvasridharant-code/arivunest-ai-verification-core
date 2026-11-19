@@ -42,17 +42,25 @@ def verify_certificate(file_path: str) -> dict:
         "strictly matching the required JSON schema."
     )
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[image, prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=CertificateVerification,
-            temperature=0.1,
-        ),
-    )
-
-    return json.loads(response.text)
+    # Try primary model first, fallback if temporarily overloaded (503)
+    for model_name in ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-2.5-pro"]:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[image, prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=CertificateVerification,
+                    temperature=0.1,
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            if "503" in str(e) or "404" in str(e):
+                print(f"Model {model_name} unavailable, switching model...")
+                continue
+            raise e
+    raise RuntimeError("All configured Gemini models are temporarily unavailable.")
 
 if __name__ == "__main__":
     sample_file = "sample_certificate.pdf"  # Replace with your test certificate path
