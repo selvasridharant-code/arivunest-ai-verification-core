@@ -3,10 +3,12 @@ import json
 import fitz  # PyMuPDF
 from PIL import Image
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-# 1. Define Structured Output Schema
+load_dotenv()  # Loads GEMINI_API_KEY from .env file
+
 class CertificateVerification(BaseModel):
     candidate_name: str = Field(description="Full name of the candidate on the certificate")
     certificate_id: str = Field(description="Unique certificate or reference ID, or 'N/A' if not found")
@@ -18,7 +20,6 @@ class CertificateVerification(BaseModel):
     remarks: str = Field(description="Brief notes on visual quality, missing fields, or anomalies")
 
 def load_document_as_image(file_path: str) -> Image.Image:
-    """Loads an image or converts the first page of a PDF into a PIL Image."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
         doc = fitz.open(file_path)
@@ -31,8 +32,11 @@ def load_document_as_image(file_path: str) -> Image.Image:
         raise ValueError(f"Unsupported file format: {ext}")
 
 def verify_certificate(file_path: str) -> dict:
-    """Extracts and verifies certificate metadata using Gemini Multimodal API."""
-    client = genai.Client()  # Reads GEMINI_API_KEY from environment
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in .env or environment variables.")
+
+    client = genai.Client(api_key=api_key)
     image = load_document_as_image(file_path)
 
     prompt = (
@@ -42,8 +46,8 @@ def verify_certificate(file_path: str) -> dict:
         "strictly matching the required JSON schema."
     )
 
-    # Try primary model first, fallback if temporarily overloaded (503)
-    for model_name in ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-2.5-pro"]:
+    # Verified models from your API key list, ordered for fast response
+    for model_name in ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.8-flash"]:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -56,14 +60,15 @@ def verify_certificate(file_path: str) -> dict:
             )
             return json.loads(response.text)
         except Exception as e:
-            if "503" in str(e) or "404" in str(e):
-                print(f"Model {model_name} unavailable, switching model...")
+            err_msg = str(e)
+            if "503" in err_msg or "429" in err_msg:
+                print(f"{model_name} busy, switching immediately...")
                 continue
             raise e
-    raise RuntimeError("All configured Gemini models are temporarily unavailable.")
+    raise RuntimeError("All configured Gemini models are temporarily busy.")
 
 if __name__ == "__main__":
-    sample_file = "sample_certificate.pdf"  # Replace with your test certificate path
+    sample_file = "sample_certificate.pdf"
     if os.path.exists(sample_file):
         result = verify_certificate(sample_file)
         print(json.dumps(result, indent=2))
